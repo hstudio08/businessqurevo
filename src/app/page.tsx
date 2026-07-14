@@ -6,6 +6,10 @@ import {
   Globe, Smartphone, MessageCircle, ShieldCheck, Tag,
   Star, PlayCircle, Phone, MapPin, Search, ChevronDown, CheckCircle2, Headphones
 } from 'lucide-react';
+import ProblemSolution from '@/components/ProblemSolution';
+import TheJourney from '@/components/TheJourney';
+import Footer from '@/components/Footer';
+import Navbar from '@/components/Navbar';
 
 // Punchy Animation Variants
 const fadeUp: Variants = {
@@ -26,32 +30,7 @@ export default function Home() {
   return (
     <main className="min-h-screen relative">
       
-      {/* NAVBAR */}
-      <nav className="absolute top-0 w-full z-50 px-6 py-6">
-        <div className="max-w-[1400px] mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-tr from-lime_cream to-fern rounded-br-xl rounded-tl-xl flex items-center justify-center shadow-[0_0_15px_rgba(236,243,158,0.5)]"></div>
-            <span className="text-2xl font-bold tracking-tight">QUREVO <span className="text-lime_cream font-medium">Businesses</span></span>
-          </div>
-          
-          <div className="hidden lg:flex items-center gap-8 text-sm font-medium text-gray-300">
-            <Link href="#" className="hover:text-white transition-colors">Features</Link>
-            <Link href="#" className="hover:text-white transition-colors">Pricing</Link>
-            <Link href="#" className="hover:text-white transition-colors">Demo</Link>
-            <Link href="#" className="hover:text-white transition-colors">How It Works</Link>
-            <Link href="#" className="hover:text-white transition-colors">FAQ</Link>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <Link href="/login" className="px-5 py-2.5 rounded-full border border-white/20 text-sm font-medium hover:bg-white/10 transition-all flex items-center gap-2">
-              <UserIcon /> Login
-            </Link>
-            <Link href="/register" className="px-5 py-2.5 rounded-full bg-lime_cream text-evergreen text-sm font-bold hover:bg-[#d8e08d] transition-all flex items-center gap-2 shadow-[0_0_20px_rgba(236,243,158,0.3)] hover:shadow-[0_0_30px_rgba(236,243,158,0.6)]">
-              Register Business <ArrowRightIcon />
-            </Link>
-          </div>
-        </div>
-      </nav>
+      <Navbar />
 
       {/* HERO SECTION */}
       <section className="relative pt-32 pb-20 lg:pt-40 lg:pb-32 px-6 max-w-[1400px] mx-auto flex flex-col lg:flex-row items-center gap-12 z-10 min-h-screen">
@@ -218,13 +197,6 @@ export default function Home() {
         </motion.div>
       </section>
 
-      {/* Scroll Down Indicator */}
-      <div className="absolute bottom-6 w-full flex flex-col items-center justify-center text-gray-400 text-sm z-20">
-        <span className="mb-2 font-medium">Scroll to explore</span>
-        <motion.div animate={{ y: [0, 8, 0] }} transition={{ duration: 1.5, repeat: Infinity }}>
-          <ChevronDown size={20} />
-        </motion.div>
-      </div>
 
       {/* BOTTOM TRUST BANNER (The white card at bottom of image) */}
       <section className="relative z-30 px-6 pb-20">
@@ -272,7 +244,9 @@ export default function Home() {
           </div>
         </motion.div>
       </section>
-      
+      <ProblemSolution />
+      <TheJourney />
+      <Footer />
     </main>
   );
 }
