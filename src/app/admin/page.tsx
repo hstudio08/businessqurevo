@@ -2,23 +2,40 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import AdminDashboard from '../../components/AdminDashboard'; // Assuming you move the dashboard logic here
+import { auth } from '../../lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import AdminDashboard from '../../components/AdminDashboard';
 
 export default function AdminPage() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const sessionEmail = localStorage.getItem('qurevo_session');
-    // Replace with your actual admin email
-    if (sessionEmail === 'admin@qurevo.in') {
-      setIsAuthenticated(true);
-    } else {
-      router.push('/login');
-    }
+    // Listen for Firebase Auth state changes
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      // Ensure the user exists and matches the admin email defined in ENV
+      if (user && user.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
+        setIsAuthenticated(true);
+      } else {
+        router.push('/admin/login');
+      }
+      setLoading(false);
+    });
+
+    // Cleanup subscription on unmount
+    return () => unsubscribe();
   }, [router]);
 
-  if (!isAuthenticated) return <div className="min-h-screen bg-slate-50 flex items-center justify-center">Authenticating...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500">
+        Authenticating Secure Session...
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) return null; // Will redirect via the useEffect
 
   return <AdminDashboard />;
 }

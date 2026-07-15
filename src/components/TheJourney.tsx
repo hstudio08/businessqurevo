@@ -46,32 +46,47 @@ export default function TheJourney() {
     }
   ];
 
-  const pricingPlans = [
-    {
-      name: "Monthly",
-      price: "₹299",
-      duration: "per month",
-      billing: "Billed monthly",
-      features: ["Premium business page", "Hosting & SSL", "WhatsApp integration", "Google Maps"],
-      recommended: false,
-    },
-    {
-      name: "Quarterly",
-      price: "₹749",
-      duration: "every 3 months",
-      billing: "Equivalent to ₹249/mo",
-      features: ["All Monthly features", "10 Image Gallery", "Contact information", "Standard SEO"],
-      recommended: false,
-    },
-    {
-      name: "Annual",
-      price: "₹1,999",
-      duration: "per year",
-      billing: "Equivalent to ₹166/mo",
-      features: ["All Quarterly features", "Priority support", "Annual maintenance", "Premium search visibility"],
-      recommended: true,
-    }
-  ];
+const pricingPlans = [
+  {
+    name: "Starter",
+    price: "₹239",
+    duration: "/mo",
+    billing: "Available in 1, 3, 6, or 12-month cycles",
+    recommended: false,
+    features: [
+      "Essential digital presence",
+      "Standard business listing",
+      "Basic customer support",
+      "Up to 10 brand assets"
+    ]
+  },
+  {
+    name: "Premium",
+    price: "₹299",
+    duration: "/mo",
+    billing: "Available in 1, 3, 6, or 12-month cycles",
+    recommended: true,
+    features: [
+      "Advanced features & growth",
+      "Priority search placement",
+      "Priority customer support",
+      "Extended custom descriptions"
+    ]
+  },
+  {
+    name: "Premium Plus",
+    price: "₹379",
+    duration: "/mo",
+    billing: "Available in 1, 3, 6, or 12-month cycles",
+    recommended: false,
+    features: [
+      "Ultimate visibility & scaling",
+      "Top-tier search ranking",
+      "24/7 dedicated assistance",
+      "Full suite of marketing tools"
+    ]
+  }
+];
 
   // Animation variants
   const fadeUp: Variants = {
@@ -172,7 +187,7 @@ export default function TheJourney() {
           </motion.div>
         </div>
 
-        {/* --- PRICING SECTION --- */}
+{/* --- PRICING SECTION --- */}
         <motion.div 
           initial="hidden"
           whileInView="visible"
@@ -186,7 +201,7 @@ export default function TheJourney() {
             Choose the plan that fits your business
           </p>
           <p className="mt-4 text-lg text-gray-400">
-            Start with our flexible short-term plans, or maximize your savings with our annual subscription.
+            Start with our flexible short-term monthly plans, or maximize your savings with our annual subscriptions.
           </p>
         </motion.div>
 
@@ -220,7 +235,7 @@ export default function TheJourney() {
                   <span className="text-4xl lg:text-5xl font-extrabold text-white">{plan.price}</span>
                   <span className="text-gray-400 font-medium">{plan.duration}</span>
                 </div>
-                <p className={`text-sm mt-3 font-medium inline-block px-3 py-1 rounded-full ${plan.recommended ? 'bg-lime_cream/20 text-lime_cream' : 'bg-white/10 text-gray-300'}`}>
+                <p className={`text-xs mt-4 font-medium inline-block px-3 py-1.5 rounded-full ${plan.recommended ? 'bg-lime_cream/20 text-lime_cream' : 'bg-white/10 text-gray-300'}`}>
                   {plan.billing}
                 </p>
               </div>

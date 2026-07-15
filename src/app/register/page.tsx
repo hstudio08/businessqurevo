@@ -10,6 +10,8 @@ import {
   User, MapPin, Briefcase, Check, ArrowLeft, AlertCircle
 } from 'lucide-react';
 import emailjs from '@emailjs/browser';
+import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../../lib/firebase'; 
 
 const BUSINESS_CATEGORIES = [
   "Accounting", "Advertising", "Agriculture", "Apparel & Fashion", "Architecture", "Automotive", 
@@ -26,7 +28,7 @@ const BUSINESS_CATEGORIES = [
   "Web Development", "Wedding Planning", "Yoga Studio", "Custom"
 ];
 
-const STEPS = ["Personal Info", "Business Identity", "Descriptions", "Select Plan", "Brand Assets"];
+const STEPS = ["Profile", "Identity", "Details", "Plan", "Assets"];
 
 export default function RegisterBusiness() {
   const router = useRouter();
@@ -36,13 +38,15 @@ export default function RegisterBusiness() {
   const [formData, setFormData] = useState({
     fullName: '', role: '', phone: '', email: '', address: '',
     businessName: '', category: '', customCategory: '', shortDescription: '', longDescription: '',
-    pricingPlan: 'annual',
+    planTier: 'Premium',   
+    planCycle: 'Yearly',   
     images: [] as string[]
   });
 
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isUploadingImages, setIsUploadingImages] = useState(false);
+  const [noPhotosChecked, setNoPhotosChecked] = useState(false);
   
   const [otpSent, setOtpSent] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
@@ -50,16 +54,14 @@ export default function RegisterBusiness() {
   const [userOtpInput, setUserOtpInput] = useState('');
   const [isLoadingOtp, setIsLoadingOtp] = useState(false);
 
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const filteredCategories = BUSINESS_CATEGORIES.filter(c => c.toLowerCase().includes(searchQuery.toLowerCase()));
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
     if (e.target.name === 'email') setIsLoginMode(false);
-  };
-
-  const checkEmailExists = (email: string) => {
-    const existingUsers = JSON.parse(localStorage.getItem('qurevo_users') || '[]');
-    return existingUsers.includes(email);
   };
 
   const handleNextStep = () => {
@@ -81,17 +83,19 @@ export default function RegisterBusiness() {
 
   const handleSendOTP = async () => {
     if (!formData.email) return alert("Please enter an email first.");
-    
-    if (checkEmailExists(formData.email)) {
-      setIsLoginMode(true);
-    }
-
     setIsLoadingOtp(true);
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedOtp(otp);
-    const time = new Date(new Date().getTime() + 15 * 60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-
+    
     try {
+      const usersRef = collection(db, "users");
+      const q = query(usersRef, where("email", "==", formData.email.toLowerCase()));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) setIsLoginMode(true);
+
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      setGeneratedOtp(otp);
+      const time = new Date(new Date().getTime() + 15 * 60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
       emailjs.init(process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY!);
       await emailjs.send(
         process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID!, 
@@ -100,20 +104,55 @@ export default function RegisterBusiness() {
       );
       setOtpSent(true);
     } catch (error) {
-      console.error("Failed to send OTP", error);
-      alert("Failed to send OTP. Please check your EmailJS configuration.");
+      alert("Failed to send OTP. Please check your network or EmailJS configuration.");
     } finally {
       setIsLoadingOtp(false);
     }
   };
 
-  const handleVerifyOTP = () => {
+  // UPDATED: Dynamically route existing users to their unique dashboard
+  const handleVerifyOTP = async () => {
     if (userOtpInput === generatedOtp) {
       setOtpVerified(true);
+      
       if (isLoginMode) {
-        alert("Login successful! Redirecting to dashboard...");
-        localStorage.setItem('qurevo_session', formData.email);
-        router.push('/dashboard'); 
+        setIsLoadingOtp(true); // Reuse loader to show we are routing
+        try {
+          // Fetch the user's business application to construct their unique dashboard URL
+          const q = query(
+            collection(db, "business_applications"), 
+            where("email", "==", formData.email.toLowerCase())
+          );
+          const querySnapshot = await getDocs(q);
+
+          let targetRoute = '/register'; // Fallback if they somehow don't have an application yet
+
+          if (!querySnapshot.empty) {
+            const bizData = querySnapshot.docs[0].data();
+            
+            // Helper function to safely convert strings into URL-friendly slugs
+            const slugify = (text?: string) => {
+              if (!text) return '';
+              return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+            };
+
+            const stateSlug = slugify(bizData.state) || 'india';
+            const citySlug = slugify(bizData.city) || 'local';
+            const bizSlug = slugify(bizData.businessName) || 'business';
+
+            // Construct the final custom route
+            targetRoute = `/${stateSlug}/${citySlug}/${bizSlug}/dashboard`;
+          }
+
+          alert("Login successful! Redirecting to your workspace...");
+          localStorage.setItem('qurevo_session', formData.email.toLowerCase());
+          router.push(targetRoute);
+
+        } catch (error) {
+          console.error("Routing Error:", error);
+          alert("Failed to generate your secure workspace link. Please try again.");
+          setIsLoadingOtp(false);
+        }
       }
     } else {
       alert("Incorrect OTP. Please try again.");
@@ -129,7 +168,7 @@ export default function RegisterBusiness() {
     const apiKey = process.env.NEXT_PUBLIC_IMGBB_API_KEY;
 
     if (!apiKey) {
-      alert("ImgBB API key is missing. Check your environment variables.");
+      alert("ImgBB API key is missing.");
       setIsUploadingImages(false);
       return;
     }
@@ -143,8 +182,8 @@ export default function RegisterBusiness() {
         if (data.success) uploadedUrls.push(data.data.url);
       }
       setFormData(prev => ({ ...prev, images: [...prev.images, ...uploadedUrls].slice(0, 10) }));
+      setNoPhotosChecked(false);
     } catch (error) {
-      console.error("Upload error:", error);
       alert("Error uploading images.");
     } finally {
       setIsUploadingImages(false);
@@ -155,270 +194,296 @@ export default function RegisterBusiness() {
     setFormData(prev => ({ ...prev, images: prev.images.filter((_, index) => index !== indexToRemove) }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handlePreSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!otpVerified) return alert("Please verify your email before submitting.");
-    
-    // 1. Save Full Application to Admin Dashboard Database
-    const existingApps = JSON.parse(localStorage.getItem('qurevo_applications') || '[]');
-    const newApp = {
-      ...formData,
-      id: Math.random().toString(36).substr(2, 9),
-      status: 'Pending',
-      submissionDate: new Date().toISOString()
-    };
-    localStorage.setItem('qurevo_applications', JSON.stringify([...existingApps, newApp]));
-
-    // 2. Save Email to Users Database (This fixes the Login issue)
-    const existingUsers = JSON.parse(localStorage.getItem('qurevo_users') || '[]');
-    if (!existingUsers.includes(formData.email)) {
-      localStorage.setItem('qurevo_users', JSON.stringify([...existingUsers, formData.email]));
+    if (formData.images.length === 0 && !noPhotosChecked) {
+      return alert("You must either upload at least one photo OR check the box stating you don't have photos right now.");
     }
+    setShowConfirmModal(true);
+  };
 
-    // 3. Log user in and redirect to Thank You page
-    localStorage.setItem('qurevo_session', formData.email);
-    router.push('/thank-you');
+  const handleFinalSubmit = async () => {
+    setIsSubmitting(true);
+    try {
+      await addDoc(collection(db, "business_applications"), {
+        ...formData,
+        status: 'pending',
+        submittedAt: new Date().toISOString(),
+        createdAt: serverTimestamp()
+      });
+
+      const usersRef = collection(db, "users");
+      const q = query(usersRef, where("email", "==", formData.email.toLowerCase()));
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        await addDoc(collection(db, "users"), {
+          email: formData.email.toLowerCase(),
+          businessName: formData.businessName,
+          createdAt: serverTimestamp()
+        });
+      }
+
+      localStorage.setItem('qurevo_session', formData.email);
+      setShowConfirmModal(false);
+      router.push('/thank-you');
+    } catch (error) {
+      alert("A database error occurred. Please try again.");
+      setShowConfirmModal(false);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const getMonthsMultiplier = (cycle: string) => {
+    switch (cycle) {
+      case 'Monthly': return 1;
+      case 'Quarterly': return 3;
+      case 'Half-Yearly': return 6;
+      case 'Yearly': return 12;
+      default: return 12;
+    }
+  };
+
+  const calculatePrice = (baseRate: number, cycle: string) => {
+    return baseRate * getMonthsMultiplier(cycle);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 relative overflow-hidden font-sans">
-      <div className="absolute top-0 left-0 w-full h-[55vh] bg-gradient-to-b from-[#f8fdfa] to-slate-50 z-0 border-b border-emerald-100/50">
-        <div className="absolute top-0 right-0 w-[40vw] h-[40vw] bg-emerald-100/40 rounded-full blur-[100px] -translate-y-1/2 translate-x-1/3"></div>
-      </div>
+    <div className="min-h-screen bg-[#F4F7F5] text-evergreen relative overflow-hidden font-sans flex items-start sm:items-center justify-center p-0 sm:p-6 lg:p-8">
+      
+      {/* Abstract Light-Mode Glassmorphism Background */}
+      <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-fern-500/10 rounded-full blur-[120px] pointer-events-none"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[400px] h-[400px] bg-lime_cream/30 rounded-full blur-[100px] pointer-events-none"></div>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-20 relative z-10">
-        <div className="text-center mb-12">
-          <Link href="/" className="inline-flex items-center justify-center w-14 h-14 bg-white rounded-2xl shadow-sm border border-emerald-100 mb-6 group hover:shadow-md transition-shadow">
-            <div className="w-8 h-8 bg-gradient-to-tr from-[#ECF39E] to-[#90A955] rounded-br-xl rounded-tl-xl group-hover:scale-110 transition-transform duration-300"></div>
+      <div className="w-full max-w-2xl relative z-10 flex flex-col items-center">
+        
+        {/* Sleek App-Header */}
+        <div className="w-full mb-6 mt-8 sm:mt-0 text-center px-4">
+          <Link href="/" className="inline-flex items-center justify-center w-12 h-12 bg-white rounded-2xl shadow-sm border border-slate-200 mb-4 group hover:shadow-md transition-all">
+            <div className="w-6 h-6 bg-gradient-to-tr from-lime_cream to-fern-600 rounded-br-lg rounded-tl-lg group-hover:scale-110 transition-transform duration-300"></div>
           </Link>
-          <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight mb-4">Partner With Us</h1>
-          <p className="text-slate-600 text-lg max-w-2xl mx-auto">Provide your details below to begin establishing your premium digital presence.</p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-evergreen mb-1">Partner With Us</h1>
+          <p className="text-slate-500 text-sm max-w-md mx-auto">Manage your operations and scale globally.</p>
         </div>
 
-        {/* Progress Tracker (Hidden if Login Mode) */}
+        {/* Compact App-like Segmented Progress Bar */}
         {!isLoginMode && (
-           <div className="mb-12 relative max-w-3xl mx-auto px-4 hidden sm:block">
-           <div className="absolute top-1/2 left-0 w-full h-1 bg-slate-200 -translate-y-1/2 z-0 rounded-full"></div>
-           <motion.div 
-             className="absolute top-1/2 left-0 h-1 bg-emerald-500 -translate-y-1/2 z-0 rounded-full"
-             initial={{ width: 0 }}
-             animate={{ width: `${((currentStep - 1) / 4) * 100}%` }}
-             transition={{ duration: 0.4, ease: "easeInOut" }}
-           ></motion.div>
-           
-           <div className="relative z-10 flex justify-between">
-             {STEPS.map((step, idx) => {
-               const stepNum = idx + 1;
-               const isActive = stepNum === currentStep;
-               const isCompleted = stepNum < currentStep;
-               
-               return (
-                 <div key={step} className="flex flex-col items-center">
-                   <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-colors duration-300 ${isActive ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30' : isCompleted ? 'bg-emerald-500 text-white' : 'bg-white text-slate-400 border border-slate-200'}`}>
-                     {isCompleted ? <Check size={18} /> : stepNum}
-                   </div>
-                   <span className={`mt-2 text-[10px] font-semibold ${isActive ? 'text-emerald-700' : 'text-slate-500'}`}>{step}</span>
-                 </div>
-               )
-             })}
-           </div>
-         </div>
+          <div className="w-full max-w-lg mb-8 px-4 flex gap-1.5">
+            {STEPS.map((step, idx) => {
+              const isActive = (idx + 1) === currentStep;
+              const isCompleted = (idx + 1) < currentStep;
+              return (
+                <div key={step} className="flex-1 flex flex-col gap-2 relative group">
+                  <div className={`h-1.5 w-full rounded-full transition-colors duration-300 ${isActive ? 'bg-fern-500' : isCompleted ? 'bg-fern-500/40' : 'bg-slate-200'}`}></div>
+                  <span className={`text-center text-[10px] font-bold uppercase tracking-wider transition-colors duration-300 hidden sm:block ${isActive ? 'text-fern-600' : 'text-slate-400'}`}>{step}</span>
+                </div>
+              )
+            })}
+          </div>
         )}
 
-        <form onSubmit={handleSubmit} className="bg-white/80 backdrop-blur-xl border border-white rounded-[2rem] p-6 sm:p-10 shadow-xl shadow-slate-200/50">
+        {/* The Clean White Form Card */}
+        <form onSubmit={handlePreSubmit} className="w-full bg-white sm:rounded-[2rem] p-6 sm:p-10 shadow-premium border-y sm:border border-slate-100 min-h-[60vh] sm:min-h-0 flex flex-col justify-between">
           
           <AnimatePresence mode="wait">
-            {/* --- STEP 1: PERSONAL INFO --- */}
+            
+            {/* STEP 1: PERSONAL INFO */}
             {currentStep === 1 && (
-              <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
-                <div className="border-b border-slate-100 pb-4">
-                  <h2 className="text-2xl font-bold text-slate-900">{isLoginMode ? "Account Found" : "Personal Information"}</h2>
-                  <p className="text-slate-500 text-sm mt-1">{isLoginMode ? "Welcome back! Please verify your email to log in." : "We need to know who is managing this account."}</p>
+              <motion.div key="step1" initial={{ opacity: 0, x: 15 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -15 }} transition={{ duration: 0.3 }} className="space-y-6">
+                
+                <div className="mb-6">
+                  <h2 className="text-xl font-bold text-evergreen">{isLoginMode ? "Account Found" : "Personal Profile"}</h2>
+                  <p className="text-slate-500 text-sm mt-1">{isLoginMode ? "Verify via secure OTP." : "Primary contact details."}</p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Email / OTP Block - WhatsApp/App style */}
+                <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100 shadow-sm">
+                  <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">Account Email <span className="text-fern-500">*</span></label>
                   
-                  {/* Email & OTP Field */}
-                  <div className="md:col-span-2 bg-emerald-50/50 p-5 rounded-2xl border border-emerald-100">
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Email Address <span className="text-red-500">*</span></label>
-                    
-                    {isLoginMode && (
-                      <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-sm flex items-start gap-2">
-                        <AlertCircle size={18} className="shrink-0 mt-0.5" />
-                        <p>An account is already registered with this email. An OTP has been sent so you can log in to your dashboard.</p>
-                      </div>
+                  {isLoginMode && (
+                    <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl text-xs flex items-start gap-2">
+                      <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                      <p>Account registered. Complete verification to access your dashboard.</p>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1">
+                      <Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input type="email" name="email" value={formData.email} onChange={handleInputChange} disabled={otpVerified || otpSent || isLoadingOtp} className="w-full bg-white border border-slate-200 rounded-2xl py-3.5 pl-11 pr-4 text-evergreen text-sm font-medium focus:outline-none focus:border-fern-500 focus:ring-4 focus:ring-fern-500/10 transition-all disabled:opacity-60 disabled:bg-slate-100" placeholder="hello@business.com"/>
+                    </div>
+                    {!otpVerified ? (
+                      <button type="button" onClick={handleSendOTP} disabled={isLoadingOtp || !formData.email || (otpSent && !isLoginMode)} className="shrink-0 bg-fern-600 hover:bg-fern-700 text-white px-6 py-3.5 rounded-2xl text-sm font-bold transition-all disabled:opacity-50 flex items-center justify-center min-w-[130px] active:scale-95 shadow-sm">
+                        {isLoadingOtp ? <Loader2 size={16} className="animate-spin" /> : (otpSent ? "Resend Code" : "Send Code")}
+                      </button>
+                    ) : (
+                      <div className="shrink-0 bg-fern-50 border border-fern-200 text-fern-700 px-6 py-3.5 rounded-2xl text-sm font-bold flex items-center justify-center gap-2"><ShieldCheck size={16} /> Verified</div>
                     )}
+                  </div>
 
-                    <div className="flex flex-col sm:flex-row gap-3">
-                      <div className="relative flex-1">
-                        <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input 
-                          type="email" name="email" value={formData.email} onChange={handleInputChange} disabled={otpVerified || otpSent}
-                          className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 disabled:bg-slate-50 disabled:text-slate-500"
-                          placeholder="hello@business.com"
-                        />
-                      </div>
-                      {!otpVerified ? (
-                        <button 
-                          type="button" onClick={handleSendOTP} disabled={isLoadingOtp || !formData.email || (otpSent && !isLoginMode)}
-                          className="shrink-0 bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center justify-center min-w-[140px]"
-                        >
-                          {isLoadingOtp ? <Loader2 size={18} className="animate-spin" /> : (otpSent ? "Resend OTP" : "Send OTP")}
-                        </button>
-                      ) : (
-                        <div className="shrink-0 bg-emerald-100 border border-emerald-200 text-emerald-700 px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2">
-                          <ShieldCheck size={18} /> Verified
-                        </div>
-                      )}
-                    </div>
-
-                    <AnimatePresence>
-                      {otpSent && !otpVerified && (
-                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-4 pt-4 border-t border-emerald-200/50 flex flex-col sm:flex-row gap-3 items-end overflow-hidden">
-                          <div className="w-full">
-                            <label className="block text-xs font-semibold text-emerald-800 mb-2">Enter the 6-digit code</label>
-                            <input 
-                              type="text" maxLength={6} value={userOtpInput} onChange={(e) => setUserOtpInput(e.target.value)}
-                              className="w-full bg-white border border-emerald-200 rounded-xl px-4 py-3 text-slate-900 text-center tracking-[0.5em] font-bold focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                            />
-                          </div>
-                          <button type="button" onClick={handleVerifyOTP} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-xl font-bold transition-colors">
-                            {isLoginMode ? "Login" : "Verify"}
+                  <AnimatePresence>
+                    {otpSent && !otpVerified && (
+                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-4 pt-4 border-t border-slate-200 overflow-hidden">
+                        <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide text-center sm:text-left">Enter 6-Digit Code</label>
+                        <div className="flex flex-col sm:flex-row gap-3">
+                          <input type="text" maxLength={6} value={userOtpInput} onChange={(e) => setUserOtpInput(e.target.value)} disabled={isLoadingOtp} className="w-full bg-white border border-slate-200 focus:border-fern-500 focus:ring-4 focus:ring-fern-500/10 rounded-2xl px-4 py-3.5 text-evergreen text-center tracking-[0.5em] font-bold outline-none transition-all disabled:opacity-50"/>
+                          <button type="button" onClick={handleVerifyOTP} disabled={isLoadingOtp} className="w-full sm:w-auto bg-evergreen hover:bg-evergreen-400 text-white px-8 py-3.5 rounded-2xl text-sm font-bold transition-colors active:scale-95 shadow-sm disabled:opacity-50 flex justify-center items-center">
+                            {isLoadingOtp && isLoginMode ? <Loader2 size={16} className="animate-spin" /> : isLoginMode ? "Login" : "Verify"}
                           </button>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
-                  {!isLoginMode && (
-                    <>
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">Full Name <span className="text-red-500">*</span></label>
-                        <div className="relative">
-                          <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                          <input type="text" name="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-slate-900 focus:outline-none focus:border-emerald-500" placeholder="John Doe"/>
                         </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">Role in Business <span className="text-red-500">*</span></label>
-                        <div className="relative">
-                          <Briefcase size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                          <select name="role" value={formData.role} onChange={handleInputChange} className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-slate-900 focus:outline-none focus:border-emerald-500 appearance-none">
-                            <option value="">Select your role</option>
-                            <option value="Owner">Owner / Founder</option>
-                            <option value="Manager">Manager</option>
-                          </select>
-                          <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">Phone Number <span className="text-red-500">*</span></label>
-                        <div className="relative">
-                          <Phone size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                          <input type="tel" name="phone" value={formData.phone} onChange={handleInputChange} className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-slate-900 focus:outline-none focus:border-emerald-500" placeholder="+91 98765 43210"/>
-                        </div>
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">Physical Address <span className="text-red-500">*</span></label>
-                        <div className="relative">
-                          <MapPin size={18} className="absolute left-3 top-4 text-slate-400" />
-                          <textarea name="address" value={formData.address} onChange={handleInputChange} rows={2} className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-slate-900 focus:outline-none focus:border-emerald-500 resize-none" placeholder="Full street address, City, PIN Code..."/>
-                        </div>
-                      </div>
-                    </>
-                  )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
+
+                {!isLoginMode && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide pl-1">Full Name <span className="text-fern-500">*</span></label>
+                      <div className="relative">
+                        <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input type="text" name="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 pl-11 pr-4 text-evergreen text-sm font-medium focus:outline-none focus:bg-white focus:border-fern-500 focus:ring-4 focus:ring-fern-500/10 transition-all placeholder:text-slate-400" placeholder="John Doe"/>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide pl-1">Role <span className="text-fern-500">*</span></label>
+                      <div className="relative">
+                        <Briefcase size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <select name="role" value={formData.role} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 pl-11 pr-4 text-evergreen text-sm font-medium focus:outline-none focus:bg-white focus:border-fern-500 focus:ring-4 focus:ring-fern-500/10 transition-all appearance-none">
+                          <option value="">Select role</option>
+                          <option value="Owner">Owner / Founder</option>
+                          <option value="Manager">Manager</option>
+                        </select>
+                        <ChevronDown size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide pl-1">Phone <span className="text-fern-500">*</span></label>
+                      <div className="relative">
+                        <Phone size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input type="tel" name="phone" value={formData.phone} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 pl-11 pr-4 text-evergreen text-sm font-medium focus:outline-none focus:bg-white focus:border-fern-500 focus:ring-4 focus:ring-fern-500/10 transition-all placeholder:text-slate-400" placeholder="+91 98765 43210"/>
+                      </div>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide pl-1">Address <span className="text-fern-500">*</span></label>
+                      <div className="relative">
+                        <MapPin size={16} className="absolute left-4 top-4 text-slate-400" />
+                        <textarea name="address" value={formData.address} onChange={handleInputChange} rows={2} className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 pl-11 pr-4 text-evergreen text-sm font-medium focus:outline-none focus:bg-white focus:border-fern-500 focus:ring-4 focus:ring-fern-500/10 transition-all resize-none placeholder:text-slate-400" placeholder="Street, City, PIN..."/>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
 
-            {/* --- STEP 2: BUSINESS IDENTITY --- */}
+            {/* STEP 2: BUSINESS IDENTITY */}
             {currentStep === 2 && (
-              <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
-                <div className="border-b border-slate-100 pb-4">
-                  <h2 className="text-2xl font-bold text-slate-900">Business Identity</h2>
+              <motion.div key="step2" initial={{ opacity: 0, x: 15 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -15 }} transition={{ duration: 0.3 }} className="space-y-6">
+                <div className="mb-6">
+                  <h2 className="text-xl font-bold text-evergreen">Business Identity</h2>
+                  <p className="text-slate-500 text-sm mt-1">Core details of your operation.</p>
                 </div>
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Business Name <span className="text-red-500">*</span></label>
-                    <div className="relative">
-                      <Building2 size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input type="text" name="businessName" value={formData.businessName} onChange={handleInputChange} className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-slate-900 focus:outline-none focus:border-emerald-500"/>
-                    </div>
-                  </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide pl-1">Business Name <span className="text-fern-500">*</span></label>
                   <div className="relative">
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Business Sector <span className="text-red-500">*</span></label>
-                    <div onClick={() => setIsCategoryOpen(!isCategoryOpen)} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-slate-900 cursor-pointer flex justify-between items-center">
-                      <span>{formData.category || "Select a sector..."}</span>
-                      <ChevronDown size={18} className="text-slate-400" />
-                    </div>
-                    <AnimatePresence>
-                      {isCategoryOpen && (
-                        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="absolute z-50 top-[80px] left-0 w-full bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden">
-                          <div className="p-3 border-b border-slate-100 flex items-center gap-2 bg-slate-50">
-                            <Search size={16} className="text-slate-400" />
-                            <input type="text" placeholder="Search categories..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-transparent text-sm text-slate-900 focus:outline-none" autoFocus/>
-                          </div>
-                          <ul className="max-h-60 overflow-y-auto p-2">
-                            {filteredCategories.map((cat) => (
-                              <li key={cat} onClick={() => { setFormData({...formData, category: cat}); setIsCategoryOpen(false); }} className="px-3 py-2 text-sm text-slate-700 hover:bg-emerald-50 rounded-lg cursor-pointer">{cat}</li>
-                            ))}
-                          </ul>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    <Building2 size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input type="text" name="businessName" value={formData.businessName} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 pl-11 pr-4 text-evergreen text-sm font-medium focus:outline-none focus:bg-white focus:border-fern-500 focus:ring-4 focus:ring-fern-500/10 transition-all"/>
                   </div>
-                  {formData.category === 'Custom' && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Specify Custom Sector <span className="text-red-500">*</span></label>
-                      <input type="text" name="customCategory" value={formData.customCategory} onChange={handleInputChange} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"/>
-                    </motion.div>
-                  )}
                 </div>
+                <div className="relative">
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide pl-1">Sector <span className="text-fern-500">*</span></label>
+                  <div onClick={() => setIsCategoryOpen(!isCategoryOpen)} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5 text-evergreen text-sm font-medium cursor-pointer flex justify-between items-center hover:bg-white transition-colors">
+                    <span className={formData.category ? 'text-evergreen' : 'text-slate-400'}>{formData.category || "Select classification..."}</span>
+                    <ChevronDown size={16} className="text-slate-400" />
+                  </div>
+                  <AnimatePresence>
+                    {isCategoryOpen && (
+                      <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="absolute z-50 mt-2 w-full bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+                        <div className="p-3 border-b border-slate-100 flex items-center gap-2 bg-slate-50">
+                          <Search size={14} className="text-slate-400" />
+                          <input type="text" placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-transparent text-sm text-evergreen font-medium focus:outline-none" autoFocus/>
+                        </div>
+                        <ul className="max-h-48 overflow-y-auto p-1 scrollbar-thin">
+                          {filteredCategories.map((cat) => (
+                            <li key={cat} onClick={() => { setFormData({...formData, category: cat}); setIsCategoryOpen(false); }} className="px-3 py-2.5 text-sm text-slate-600 font-medium hover:bg-fern-50 hover:text-fern-700 rounded-xl cursor-pointer transition-colors">{cat}</li>
+                          ))}
+                        </ul>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+                {formData.category === 'Custom' && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide pl-1">Custom Sector <span className="text-fern-500">*</span></label>
+                    <input type="text" name="customCategory" value={formData.customCategory} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 px-4 text-evergreen text-sm font-medium focus:outline-none focus:bg-white focus:border-fern-500 focus:ring-4 focus:ring-fern-500/10 transition-all"/>
+                  </motion.div>
+                )}
               </motion.div>
             )}
 
-            {/* --- STEP 3: DESCRIPTIONS --- */}
+            {/* STEP 3: DESCRIPTIONS */}
             {currentStep === 3 && (
-              <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
-                <div className="border-b border-slate-100 pb-4">
-                  <h2 className="text-2xl font-bold text-slate-900">Business Descriptions</h2>
+              <motion.div key="step3" initial={{ opacity: 0, x: 15 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -15 }} transition={{ duration: 0.3 }} className="space-y-6">
+                <div className="mb-6">
+                  <h2 className="text-xl font-bold text-evergreen">Descriptions</h2>
+                  <p className="text-slate-500 text-sm mt-1">Define your market presence.</p>
                 </div>
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Short Description / Punchline <span className="text-red-500">*</span></label>
-                    <textarea name="shortDescription" value={formData.shortDescription} onChange={handleInputChange} rows={2} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:outline-none focus:border-emerald-500 resize-none"/>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Detailed Description <span className="text-slate-400 text-xs font-normal ml-2">(Optional)</span></label>
-                    <textarea name="longDescription" value={formData.longDescription} onChange={handleInputChange} rows={5} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:outline-none focus:border-emerald-500 resize-none"/>
-                  </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide pl-1">Punchline <span className="text-fern-500">*</span></label>
+                  <textarea name="shortDescription" value={formData.shortDescription} onChange={handleInputChange} rows={2} className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 px-4 text-evergreen text-sm font-medium focus:outline-none focus:bg-white focus:border-fern-500 focus:ring-4 focus:ring-fern-500/10 transition-all resize-none"/>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide pl-1">Deep Overview <span className="text-slate-400 lowercase font-normal">(Optional)</span></label>
+                  <textarea name="longDescription" value={formData.longDescription} onChange={handleInputChange} rows={4} className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 px-4 text-evergreen text-sm font-medium focus:outline-none focus:bg-white focus:border-fern-500 focus:ring-4 focus:ring-fern-500/10 transition-all resize-none"/>
                 </div>
               </motion.div>
             )}
 
-            {/* --- STEP 4: PLAN SELECTION --- */}
+            {/* STEP 4: PLAN SELECTION */}
             {currentStep === 4 && (
-              <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
-                <div className="border-b border-slate-100 pb-4">
-                  <h2 className="text-2xl font-bold text-slate-900">Select Your Plan</h2>
-                  <p className="text-slate-500 text-sm mt-1">Choose a package. You won't be charged until your page is live.</p>
+              <motion.div key="step4" initial={{ opacity: 0, x: 15 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -15 }} transition={{ duration: 0.3 }} className="space-y-6">
+                <div className="text-center mb-6">
+                  <h2 className="text-xl font-bold text-evergreen">Select Your Plan</h2>
+                  <p className="text-slate-500 text-sm mt-1">Billed only upon active deployment.</p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                {/* Sleek Duration Toggle */}
+                <div className="flex justify-center mb-6">
+                  <div className="bg-slate-100 p-1 rounded-2xl inline-flex shadow-inner overflow-x-auto border border-slate-200">
+                    {['Monthly', 'Quarterly', 'Half-Yearly', 'Yearly'].map((cycle) => (
+                      <button
+                        key={cycle} type="button" onClick={() => setFormData({ ...formData, planCycle: cycle })}
+                        className={`px-4 sm:px-5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-300 ${formData.planCycle === cycle ? 'bg-white text-fern-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        {cycle}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Pricing Tiers - Compact App Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
-                    { id: 'monthly', name: 'Monthly', price: '₹299/mo', desc: 'Pay as you go' },
-                    { id: 'quarterly', name: 'Quarterly', price: '₹749/3mo', desc: 'Save 15%' },
-                    { id: 'annual', name: 'Annual', price: '₹1,999/yr', desc: 'Best Value', recommended: true }
+                    { id: 'Starter', price: 239, desc: 'Essential presence.' },
+                    { id: 'Premium', price: 299, desc: 'Growth tools.', recommended: true },
+                    { id: 'Premium Plus', price: 379, desc: 'Ultimate scaling.' }
                   ].map((plan) => (
                     <div 
-                      key={plan.id} onClick={() => setFormData({...formData, pricingPlan: plan.id})}
-                      className={`relative cursor-pointer rounded-2xl p-6 border-2 transition-all duration-300 ${formData.pricingPlan === plan.id ? 'border-emerald-600 bg-emerald-50 shadow-md scale-105 z-10' : 'border-slate-200 bg-white hover:border-emerald-300'}`}
+                      key={plan.id} onClick={() => setFormData({...formData, planTier: plan.id})}
+                      className={`relative cursor-pointer rounded-3xl p-5 border-2 transition-all duration-300 ${formData.planTier === plan.id ? 'border-fern-500 bg-fern-50 shadow-md scale-[1.02] z-10' : 'border-slate-100 bg-white hover:border-slate-300'}`}
                     >
-                      {plan.recommended && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[10px] font-bold uppercase tracking-wider py-1 px-3 rounded-full">Recommended</span>}
-                      <h3 className="text-lg font-bold text-slate-900">{plan.name}</h3>
-                      <p className="text-2xl font-extrabold text-emerald-700 my-2">{plan.price}</p>
-                      <p className="text-sm text-slate-500">{plan.desc}</p>
-                      <div className={`mt-4 w-6 h-6 rounded-full border-2 flex items-center justify-center ${formData.pricingPlan === plan.id ? 'border-emerald-600 bg-emerald-600' : 'border-slate-300'}`}>
-                        {formData.pricingPlan === plan.id && <Check size={14} className="text-white" />}
+                      {plan.recommended && <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-fern-600 text-white text-[9px] font-bold uppercase tracking-wider py-0.5 px-2 rounded-full shadow-sm">Recommended</span>}
+                      <h3 className={`text-base font-bold mb-0.5 ${formData.planTier === plan.id ? 'text-fern-900' : 'text-evergreen'}`}>{plan.id}</h3>
+                      <p className="text-[10px] text-slate-500 mb-3">{plan.desc}</p>
+                      <div className="mb-4">
+                        <span className={`text-2xl font-extrabold ${formData.planTier === plan.id ? 'text-fern-600' : 'text-evergreen'}`}>₹{calculatePrice(plan.price, formData.planCycle)}</span>
+                        <span className="text-slate-400 text-[10px] font-medium"> / {formData.planCycle.toLowerCase()}</span>
+                        <p className="text-[9px] text-slate-400 mt-0.5 font-medium">(₹{plan.price}/mo)</p>
+                      </div>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${formData.planTier === plan.id ? 'border-fern-500 bg-fern-500' : 'border-slate-200'}`}>
+                        {formData.planTier === plan.id && <Check size={12} className="text-white" strokeWidth={3} />}
                       </div>
                     </div>
                   ))}
@@ -426,50 +491,48 @@ export default function RegisterBusiness() {
               </motion.div>
             )}
 
-            {/* --- STEP 5: ASSETS & SUBMIT --- */}
+            {/* STEP 5: ASSETS & SUBMIT */}
             {currentStep === 5 && (
-              <motion.div key="step5" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
-                <div className="border-b border-slate-100 pb-4">
-                  <h2 className="text-2xl font-bold text-slate-900">Brand Assets</h2>
+              <motion.div key="step5" initial={{ opacity: 0, x: 15 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -15 }} transition={{ duration: 0.3 }} className="space-y-6">
+                <div className="mb-4">
+                  <h2 className="text-xl font-bold text-evergreen">Brand Assets</h2>
                 </div>
-                <div className="flex items-start gap-3 bg-blue-50/50 border border-blue-100 rounded-xl p-4">
-                  <Info size={18} className="text-blue-500 shrink-0 mt-0.5" />
-                  <p className="text-sm text-blue-800 leading-relaxed">
-                    <strong>Notice:</strong> By uploading images, you acknowledge they will become part of your public business profile.
-                  </p>
+                
+                <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                  <Info size={16} className="text-blue-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-blue-800 leading-relaxed font-medium">Uploaded assets define your public corporate mapping.</p>
                 </div>
-                <div className="bg-slate-50 border-2 border-slate-200 border-dashed rounded-2xl p-8 text-center hover:bg-slate-100 relative">
+                
+                <div className="bg-slate-50 border border-slate-300 border-dashed rounded-3xl p-6 text-center hover:bg-slate-100 transition-colors relative">
                   {isUploadingImages ? (
-                    <div className="flex flex-col items-center justify-center py-6">
-                      <Loader2 size={32} className="text-emerald-600 animate-spin mb-4" />
-                      <p className="text-slate-700 font-medium">Uploading securely...</p>
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Loader2 size={28} className="text-fern-500 animate-spin mb-3" />
+                      <p className="text-slate-600 text-xs font-bold">Encrypting & Uploading...</p>
                     </div>
                   ) : (
                     <>
-                      <div className="w-16 h-16 mx-auto bg-white shadow-sm rounded-full flex items-center justify-center mb-4">
-                        <ImageIcon size={28} className="text-emerald-600" />
+                      <div className="w-12 h-12 mx-auto bg-white rounded-2xl shadow-sm flex items-center justify-center mb-3"><ImageIcon size={22} className="text-fern-500" /></div>
+                      <p className="text-evergreen text-sm font-bold mb-1">Select Identity Images</p>
+                      <p className="text-xs text-slate-400 mb-4 font-medium">({formData.images.length}/10 allocated slots)</p>
+                      <input type="file" multiple accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" onChange={handleImageUpload} disabled={formData.images.length >= 10 || isUploadingImages || noPhotosChecked}/>
+                      <div className="inline-block bg-white border border-slate-200 text-evergreen px-5 py-2 rounded-xl text-xs font-bold pointer-events-none shadow-sm">
+                        {formData.images.length >= 10 ? "Capacity Reached" : "Browse Device"}
                       </div>
-                      <p className="text-slate-800 font-bold mb-1">Click to upload Logo & Images</p>
-                      <p className="text-sm text-slate-500 mb-4">({formData.images.length}/10 uploaded. You can skip this for now.)</p>
-                      <input 
-                        type="file" multiple accept="image/*" 
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" 
-                        id="file-upload" onChange={handleImageUpload} disabled={formData.images.length >= 10 || isUploadingImages}
-                      />
-                      <label className="inline-block bg-white border border-slate-200 text-slate-700 px-6 py-2 rounded-full text-sm font-semibold pointer-events-none">
-                        {formData.images.length >= 10 ? "Max Reached" : "Browse Files"}
-                      </label>
                     </>
                   )}
                 </div>
+
+                <div className="flex items-center gap-3 px-1">
+                  <input type="checkbox" id="no-photos" checked={noPhotosChecked} onChange={(e) => { setNoPhotosChecked(e.target.checked); if (e.target.checked) setFormData(prev => ({ ...prev, images: [] })); }} className="w-4 h-4 rounded border-slate-300 bg-white accent-fern-500 cursor-pointer"/>
+                  <label htmlFor="no-photos" className={`text-xs cursor-pointer font-bold ${formData.images.length === 0 ? 'text-evergreen' : 'text-slate-400'}`}>Defer asset upload configuration.</label>
+                </div>
+
                 {formData.images.length > 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
                     {formData.images.map((url, idx) => (
-                      <div key={idx} className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-200 group">
-                        <img src={url} alt={`Upload ${idx + 1}`} className="w-full h-full object-cover" />
-                        <button type="button" onClick={() => removeImage(idx)} className="absolute top-2 right-2 w-6 h-6 bg-white/90 backdrop-blur-md rounded-full flex items-center justify-center text-red-500 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50">
-                          <X size={14} />
-                        </button>
+                      <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 group">
+                        <img src={url} alt={`Asset ${idx + 1}`} className="w-full h-full object-cover" />
+                        <button type="button" onClick={() => removeImage(idx)} className="absolute top-1 right-1 w-6 h-6 bg-white/90 backdrop-blur-md rounded-full flex items-center justify-center text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 hover:text-white shadow-sm"><X size={12} /></button>
                       </div>
                     ))}
                   </div>
@@ -478,27 +541,40 @@ export default function RegisterBusiness() {
             )}
           </AnimatePresence>
 
+          {/* Dynamic App Footer Actions */}
           {!isLoginMode && (
-            <div className="mt-10 pt-6 border-t border-slate-100 flex items-center justify-between">
+            <div className="mt-8 pt-5 border-t border-slate-100 flex items-center justify-between">
               {currentStep > 1 ? (
-                <button type="button" onClick={handlePrevStep} className="flex items-center gap-2 text-slate-500 hover:text-slate-800 font-semibold px-4 py-2 transition-colors">
-                  <ArrowLeft size={18} /> Back
-                </button>
+                <button type="button" onClick={handlePrevStep} className="flex items-center gap-1.5 text-slate-400 hover:text-evergreen text-sm font-bold transition-colors px-2 py-2"><ArrowLeft size={16} /> Back</button>
               ) : <div></div>}
-
               {currentStep < 5 ? (
-                <button type="button" onClick={handleNextStep} className="bg-slate-900 text-white hover:bg-slate-800 px-8 py-3.5 rounded-xl font-bold transition-all shadow-md flex items-center gap-2">
-                  Continue <ArrowRight size={18} />
-                </button>
+                <button type="button" onClick={handleNextStep} className="bg-evergreen text-white hover:bg-evergreen-400 px-7 py-3 rounded-2xl text-sm font-bold transition-all flex items-center gap-2 active:scale-95 shadow-sm">Next <ArrowRight size={16} /></button>
               ) : (
-                <button type="submit" className="bg-emerald-600 text-white hover:bg-emerald-700 px-8 py-3.5 rounded-xl font-bold transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2">
-                  Submit Application <Check size={18} />
-                </button>
+                <button type="submit" className="bg-fern-600 text-white hover:bg-fern-700 px-7 py-3 rounded-2xl text-sm font-bold transition-all shadow-md flex items-center gap-2 active:scale-95">Deploy <Check size={16} strokeWidth={3} /></button>
               )}
             </div>
           )}
         </form>
       </div>
+
+      {/* COMPACT CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {showConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-evergreen/60 backdrop-blur-md">
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 10 }} className="bg-white border border-slate-100 p-8 rounded-[2rem] w-full max-w-sm shadow-2xl relative">
+              <div className="flex justify-center mb-5"><div className="w-14 h-14 bg-fern-50 border border-fern-100 rounded-full flex items-center justify-center"><Check size={28} className="text-fern-600" /></div></div>
+              <h2 className="text-xl font-bold text-center text-evergreen mb-2">Finalize Protocol</h2>
+              <p className="text-slate-500 text-center mb-8 text-xs leading-relaxed font-medium">System is primed. Application will be submitted to Qurevo administration for structural review and deployment.</p>
+              <div className="flex flex-col gap-3">
+                <button onClick={handleFinalSubmit} disabled={isSubmitting} className="w-full bg-fern-600 text-white font-bold py-3.5 rounded-2xl flex justify-center items-center gap-2 hover:bg-fern-700 transition-all shadow-md disabled:opacity-50 text-sm active:scale-95">
+                  {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : 'Confirm & Initialize'}
+                </button>
+                <button onClick={() => setShowConfirmModal(false)} disabled={isSubmitting} className="w-full bg-slate-50 text-slate-600 font-bold py-3.5 rounded-2xl hover:bg-slate-100 transition-colors border border-slate-200 disabled:opacity-50 text-sm">Return to Editor</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
