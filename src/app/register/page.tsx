@@ -203,15 +203,27 @@ export default function RegisterBusiness() {
     setShowConfirmModal(true);
   };
 
-  const handleFinalSubmit = async () => {
+const handleFinalSubmit = async () => {
     setIsSubmitting(true);
     try {
+      // Helper to create a URL-safe string (e.g., "Labaika Institute" -> "labaika-institute")
+      const slugify = (text: string) => {
+        if (!text) return 'business';
+        return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+      };
+
+      // Add stateSlug, citySlug, and slug to the database submission
       await addDoc(collection(db, "business_applications"), {
         ...formData,
+        stateSlug: slugify("jammu and kashmir"), // You can map this dynamically if you add state/city to your form later
+        citySlug: slugify("anantnag"), 
+        slug: slugify(formData.businessName),
         status: 'pending',
         submittedAt: new Date().toISOString(),
         createdAt: serverTimestamp()
       });
+
+      // ... rest of your submit logic (Users collection logic, routing to thank you page, etc.)
 
       const usersRef = collection(db, "users");
       const q = query(usersRef, where("email", "==", formData.email.toLowerCase()));
@@ -466,9 +478,9 @@ export default function RegisterBusiness() {
                 {/* Pricing Tiers - Compact App Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
-                    { id: 'Starter', price: 239, desc: 'Essential presence.' },
-                    { id: 'Premium', price: 299, desc: 'Growth tools.', recommended: true },
-                    { id: 'Premium Plus', price: 379, desc: 'Ultimate scaling.' }
+                    { id: 'Starter', price: 75, desc: 'Essential presence.' },
+                    { id: 'Premium', price: 100, desc: 'Growth tools.', recommended: true },
+                    { id: 'Premium Plus', price: 125, desc: 'Ultimate scaling.' }
                   ].map((plan) => (
                     <div 
                       key={plan.id} onClick={() => setFormData({...formData, planTier: plan.id})}

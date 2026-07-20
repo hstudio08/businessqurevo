@@ -49,7 +49,7 @@ export default function TheJourney() {
 const pricingPlans = [
   {
     name: "Starter",
-    price: "₹239",
+    price: "₹75",
     duration: "/mo",
     billing: "Available in 1, 3, 6, or 12-month cycles",
     recommended: false,
@@ -62,7 +62,7 @@ const pricingPlans = [
   },
   {
     name: "Premium",
-    price: "₹299",
+    price: "₹100",
     duration: "/mo",
     billing: "Available in 1, 3, 6, or 12-month cycles",
     recommended: true,
@@ -75,7 +75,7 @@ const pricingPlans = [
   },
   {
     name: "Premium Plus",
-    price: "₹379",
+    price: "₹125",
     duration: "/mo",
     billing: "Available in 1, 3, 6, or 12-month cycles",
     recommended: false,

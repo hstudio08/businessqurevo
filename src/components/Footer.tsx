@@ -130,7 +130,7 @@ export default function Footer() {
             
             {/* Mini Call to Action */}
             <Link href="/register" className="mt-6 inline-flex items-center justify-between w-full p-1 pl-4 rounded-full bg-white/5 border border-white/10 hover:border-lime_cream/50 transition-all duration-300 group">
-              <span className="text-sm font-medium text-gray-300 group-hover:text-white">Start for ₹1,999/yr</span>
+              <span className="text-sm font-medium text-gray-300 group-hover:text-white">Start for ₹899/yr</span>
               <div className="w-8 h-8 rounded-full bg-lime_cream text-evergreen flex items-center justify-center shadow-[0_0_15px_rgba(236,243,158,0.3)]">
                 <ArrowRight size={16} />
               </div>

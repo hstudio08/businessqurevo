@@ -101,7 +101,7 @@ export default function AdminDashboard() {
     // Legacy fallback check
     if (!tier && legacyPlan) {
       const p = legacyPlan.toLowerCase();
-      if (p.includes('annual') || p.includes('year')) return { days: 365, price: '₹1,999 Total', label: 'Legacy Annual Plan' };
+      if (p.includes('annual') || p.includes('year')) return { days: 365, price: '₹899 Total', label: 'Legacy Annual Plan' };
       if (p.includes('quarter')) return { days: 90, price: '₹749 Total', label: 'Legacy Quarterly Plan' };
       return { days: 30, price: '₹299 Total', label: 'Legacy Monthly Plan' };
     }
